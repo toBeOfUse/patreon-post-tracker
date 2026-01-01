@@ -17,9 +17,16 @@ export default {
 	// web request entrypoint; this renders an interface for viewing the stored
 	// posts to html and returns it to the client
 	async fetch(req, env, _ctx): Promise<Response> {
+		const url = new URL(req.url);
+		// this app has exactly one page that is lightly customized using query
+		// parameters
+		if (url.pathname !== '/') {
+			return new Response('path not found', { status: 404 });
+		}
+
 		const object = env.POSTS_DO.getByName(durableObjectName);
 
-		const currentSearchParams = new URL(req.url).searchParams;
+		const currentSearchParams = url.searchParams;
 		const pageParam = currentSearchParams.get('page');
 		const page = pageParam ? Number(pageParam) : 1;
 		const sortBy = currentSearchParams.get('sort') ?? 'comment_count';
@@ -93,7 +100,7 @@ export default {
 					<thead>
 						<tr>
 							{columnHeaders.map((header) => (
-								<th style={{ whiteSpace: 'nowrap' }}>
+								<th key={header} style={{ whiteSpace: 'nowrap' }}>
 									{Object.values(SortableColumns).includes(header as SortableColumns) ? (
 										<a
 											href={`/?${extendQueryParams(currentSearchParams, {
@@ -113,7 +120,7 @@ export default {
 					</thead>
 					<tbody>
 						{posts.map((post) => (
-							<tr>
+							<tr key={post.url}>
 								{columnHeaders.map((header) => (
 									<td key={header}>{getPostCellValue(post, header)}</td>
 								))}
