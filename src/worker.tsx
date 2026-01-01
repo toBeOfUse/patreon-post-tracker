@@ -5,42 +5,19 @@ import { PostStorage, SortableColumns, StoredPost } from './storage';
 
 export { PostStorage };
 
-function generateHtmlWithLayout(children: React.ReactNode) {
-	return new Response(
-		`<!DOCTYPE HTML>` +
-			renderToString(
-				<html lang="en">
-					<head>
-						<meta charSet="UTF-8" />
-						<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-						<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css" />
-						<title>DOA Patreon Posts Data Table</title>
-					</head>
-					<body style={{ maxWidth: '900px', margin: '10px auto', fontSize: 16 }}>{children}</body>
-				</html>
-			),
-		{
-			headers: {
-				'content-type': 'text/html;',
-			},
-		}
-	);
-}
-
-export function extendQueryParams(searchParams: URLSearchParams, newParams: Record<string, string>) {
-	const copy = new URLSearchParams(searchParams.toString());
-	for (const [key, value] of Object.entries(newParams)) {
-		copy.set(key, value);
-	}
-	return copy;
-}
+const durableObjectName = 'posts_do';
 
 export default {
+	// cron job entrypoint; this just asks the durable object to update its
+	// storage by retrieving the latest data for all of the posts from the
+	// patreon api
 	async scheduled(_controller, env, _ctx) {
-		await env.POSTS_DO.getByName('posts_do').syncInPostsFromPatreon();
+		await env.POSTS_DO.getByName(durableObjectName).syncInPostsFromPatreon();
 	},
+	// web request entrypoint; this renders an interface for viewing the stored
+	// posts to html and returns it to the client
 	async fetch(req, env, _ctx): Promise<Response> {
-		const object = env.POSTS_DO.getByName('posts_do');
+		const object = env.POSTS_DO.getByName(durableObjectName);
 
 		const currentSearchParams = new URL(req.url).searchParams;
 		const pageParam = currentSearchParams.get('page');
@@ -98,7 +75,8 @@ export default {
 
 		const lastRun = await object.getLastRun();
 
-		return generateHtmlWithLayout(
+		return jsxBodyToWebResponse(
+			'DOA Patreon Posts Data Table',
 			<>
 				<div style={{ padding: 8, paddingBottom: 0 }}>
 					<h1>
@@ -186,3 +164,33 @@ export default {
 		);
 	},
 } satisfies ExportedHandler<Env>;
+
+function jsxBodyToWebResponse(title: string, children: React.ReactNode) {
+	return new Response(
+		`<!DOCTYPE HTML>` +
+			renderToString(
+				<html lang="en">
+					<head>
+						<meta charSet="UTF-8" />
+						<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+						<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css" />
+						<title>{title}</title>
+					</head>
+					<body style={{ maxWidth: '900px', margin: '10px auto', fontSize: 16 }}>{children}</body>
+				</html>
+			),
+		{
+			headers: {
+				'content-type': 'text/html;',
+			},
+		}
+	);
+}
+
+function extendQueryParams(searchParams: URLSearchParams, newParams: Record<string, string>) {
+	const copy = new URLSearchParams(searchParams.toString());
+	for (const [key, value] of Object.entries(newParams)) {
+		copy.set(key, value);
+	}
+	return copy;
+}

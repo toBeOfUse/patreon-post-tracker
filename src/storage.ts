@@ -55,10 +55,15 @@ export class PostStorage extends DurableObject<Env> {
 		this.initTables();
 	}
 
+	// dumb convenience method
+	private sql(query: string, ...bindings: any[]) {
+		return this.ctx.storage.sql.exec(query, ...bindings);
+	}
+
 	// storage internals ===================================
 
 	private async initTables() {
-		this.ctx.storage.sql.exec(`create table if not exists doa_patreon_posts(
+		this.sql(`create table if not exists doa_patreon_posts(
 			id text unique,
 			title text,
 			published_at text,
@@ -67,7 +72,7 @@ export class PostStorage extends DurableObject<Env> {
 			content_teaser_text text,
 			url text
 		)`);
-		this.ctx.storage.sql.exec(`create table if not exists doa_patreon_post_runs(
+		this.sql(`create table if not exists doa_patreon_post_runs(
 			started_at text,
 			duration_seconds integer,
 			posts_retrieved integer
@@ -76,12 +81,12 @@ export class PostStorage extends DurableObject<Env> {
 
 	private storeRunStart() {
 		const startTime = new Date();
-		this.ctx.storage.sql.exec(`insert into doa_patreon_post_runs(started_at) values (?)`, startTime.toISOString());
+		this.sql(`insert into doa_patreon_post_runs(started_at) values (?)`, startTime.toISOString());
 		return startTime;
 	}
 
 	private storeRunEnd(startTime: Date, duration: number, retrieved: number) {
-		this.ctx.storage.sql.exec(
+		this.sql(
 			`update doa_patreon_post_runs set duration_seconds = ?, posts_retrieved = ? where started_at = ?`,
 			duration,
 			retrieved,
@@ -91,7 +96,7 @@ export class PostStorage extends DurableObject<Env> {
 
 	private upsertJsonPosts(posts: PatreonApiResponse) {
 		for (const post of posts.data) {
-			this.ctx.storage.sql.exec(
+			this.sql(
 				`insert or replace into
 					doa_patreon_posts(id, title, published_at, comment_count, like_count, content_teaser_text, url)
 					values (?, ?, ?, ?, ?, ?, ?)`,
@@ -133,7 +138,7 @@ export class PostStorage extends DurableObject<Env> {
 	}
 
 	getPostCount(): number {
-		const cursor = this.ctx.storage.sql.exec('SELECT COUNT(*) count FROM doa_patreon_posts;');
+		const cursor = this.sql('SELECT COUNT(*) count FROM doa_patreon_posts;');
 		const count = cursor.one().count;
 		if (typeof count !== 'number') {
 			throw new Error('Count is somehow not a number :(');
@@ -145,7 +150,7 @@ export class PostStorage extends DurableObject<Env> {
 		const sqlQuery = `
 		select started_at, duration_seconds, posts_retrieved from doa_patreon_post_runs
 			order by started_at desc limit 1`;
-		const result = this.ctx.storage.sql.exec(sqlQuery);
+		const result = this.sql(sqlQuery);
 		return result.one() as
 			| {
 					started_at: string;
@@ -155,7 +160,7 @@ export class PostStorage extends DurableObject<Env> {
 			| undefined;
 	}
 
-	async getPosts(page = 1, sortBy: SortableColumns = SortableColumns.CommentCount, sortDirection = 'desc', query = '', perPage = 20) {
+	getPosts(page = 1, sortBy: SortableColumns = SortableColumns.CommentCount, sortDirection = 'desc', query = '', perPage = 20) {
 		if (!Object.values(SortableColumns).includes(sortBy) || !['asc', 'desc'].includes(sortDirection)) {
 			console.error('invalid sort parameters:', sortBy, sortDirection);
 			return [] as StoredPost[];
@@ -166,7 +171,7 @@ export class PostStorage extends DurableObject<Env> {
             FROM doa_patreon_posts
             WHERE title LIKE ("%" || ? || "%")
             order by ${sortBy} ${sortDirection} limit ? offset ?;`;
-		const result = this.ctx.storage.sql.exec(sqlQuery, query, limit, offset);
+		const result = this.sql(sqlQuery, query, limit, offset);
 		return result.toArray() as StoredPost[];
 	}
 }
