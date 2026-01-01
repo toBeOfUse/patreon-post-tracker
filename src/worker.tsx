@@ -1,0 +1,188 @@
+import { ReactNode } from 'react';
+import { renderToString } from 'react-dom/server';
+
+import { PostStorage, SortableColumns, StoredPost } from './storage';
+
+export { PostStorage };
+
+function generateHtmlWithLayout(children: React.ReactNode) {
+	return new Response(
+		`<!DOCTYPE HTML>` +
+			renderToString(
+				<html lang="en">
+					<head>
+						<meta charSet="UTF-8" />
+						<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+						<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css" />
+						<title>DOA Patreon Posts Data Table</title>
+					</head>
+					<body style={{ maxWidth: '900px', margin: '10px auto', fontSize: 16 }}>{children}</body>
+				</html>
+			),
+		{
+			headers: {
+				'content-type': 'text/html;',
+			},
+		}
+	);
+}
+
+export function extendQueryParams(searchParams: URLSearchParams, newParams: Record<string, string>) {
+	const copy = new URLSearchParams(searchParams.toString());
+	for (const [key, value] of Object.entries(newParams)) {
+		copy.set(key, value);
+	}
+	return copy;
+}
+
+export default {
+	async scheduled(_controller, env, _ctx) {
+		await env.POSTS_DO.getByName('posts_do').syncInPostsFromPatreon();
+	},
+	async fetch(req, env, _ctx): Promise<Response> {
+		const object = env.POSTS_DO.getByName('posts_do');
+
+		const currentSearchParams = new URL(req.url).searchParams;
+		const pageParam = currentSearchParams.get('page');
+		const page = pageParam ? Number(pageParam) : 1;
+		const sortBy = currentSearchParams.get('sort') ?? 'comment_count';
+		const sortDirection = currentSearchParams.get('direction') ?? 'desc';
+		const query = currentSearchParams.get('search') ?? '';
+
+		const perPage = 20;
+		const postCount = await object.getPostCount();
+		const maxPage = Math.ceil(postCount / perPage);
+		if (page > maxPage) {
+			return new Response(`Page not found; highest available page number is ${maxPage}`, { status: 404 });
+		}
+
+		const getPostCellValue = (post: StoredPost, header: keyof StoredPost): ReactNode => {
+			const value = post[header];
+			if (header === 'published_at') {
+				return new Date(value).toLocaleDateString();
+			} else if (header === 'title') {
+				return (
+					<a target="_blank" href={post.url}>
+						{value}
+					</a>
+				);
+			}
+			return value;
+		};
+
+		const formatColumnName = (columnName: keyof StoredPost) => {
+			if (columnName === 'comment_count') {
+				return 'Comments';
+			} else if (columnName === 'like_count') {
+				return 'Likes';
+			} else if (columnName === 'published_at') {
+				return 'Date';
+			} else if (columnName === 'title') {
+				return 'Post';
+			} else {
+				return 'URL';
+			}
+		};
+
+		const posts = await object.getPosts(page, sortBy as SortableColumns, sortDirection, query, perPage);
+		const columnHeaders = posts.length
+			? (Object.keys(posts[0]).filter((col) => col !== 'id' && col !== 'url') as (keyof (typeof posts)[0])[])
+			: [];
+
+		const nextPageParams = extendQueryParams(currentSearchParams, {
+			page: String(page + 1),
+		});
+		const prevPageParams = extendQueryParams(currentSearchParams, {
+			page: String(page - 1),
+		});
+
+		const lastRun = await object.getLastRun();
+
+		return generateHtmlWithLayout(
+			<>
+				<div style={{ padding: 8, paddingBottom: 0 }}>
+					<h1>
+						<a href="/" style={{ color: 'black', textDecorationColor: 'black' }}>
+							Dumbing of Age Patreon Posts
+						</a>
+					</h1>
+					<p>
+						This page takes the information you can already get by scrolling through the Patreon feed (whether you're subscribed or not) and
+						makes it more sortable and kinda searchable.
+					</p>
+				</div>
+				<table>
+					<thead>
+						<tr>
+							{columnHeaders.map((header) => (
+								<th style={{ whiteSpace: 'nowrap' }}>
+									{Object.values(SortableColumns).includes(header as SortableColumns) ? (
+										<a
+											href={`/?${extendQueryParams(currentSearchParams, {
+												sort: header,
+												direction: sortDirection === 'asc' || sortBy !== header ? 'desc' : 'asc',
+											}).toString()}`}
+										>
+											{formatColumnName(header)}{' '}
+											<span style={{ fontSize: '80%' }}>{sortBy === header ? (sortDirection === 'asc' ? '▲' : '▼') : ''}</span>
+										</a>
+									) : (
+										formatColumnName(header)
+									)}
+								</th>
+							))}
+						</tr>
+					</thead>
+					<tbody>
+						{posts.map((post) => (
+							<tr>
+								{columnHeaders.map((header) => (
+									<td key={header}>{getPostCellValue(post, header)}</td>
+								))}
+							</tr>
+						))}
+					</tbody>
+				</table>
+				<form style={{ display: 'flex', gap: '8px', alignItems: 'center', margin: '0px 10px 15px' }}>
+					<label style={{ fontSize: 16, margin: 0 }} htmlFor="search">
+						Search:
+					</label>
+					<input defaultValue={query} style={{ fontSize: 16, height: 32, margin: 0, padding: 8 }} id="search" name="search" />
+					{!!query && (
+						<a href={`/?${extendQueryParams(currentSearchParams, { search: '', page: '1' }).toString()}`}>
+							<button style={{ fontSize: 16, margin: 0, padding: '4px 8px', flex: 1 }} type="button">
+								Clear
+							</button>
+						</a>
+					)}
+					<button style={{ fontSize: 16, margin: 0, padding: '4px 8px', flex: 1 }} type="submit">
+						Go
+					</button>
+				</form>
+				<div style={{ display: 'flex', justifyContent: 'space-between' }}>
+					<a style={{ visibility: page === 1 ? 'hidden' : undefined }} href={`/?${prevPageParams.toString()}`}>
+						Previous
+					</a>
+					<a style={{ visibility: page === maxPage ? 'hidden' : undefined }} href={`/?${nextPageParams.toString()}`}>
+						Next
+					</a>
+				</div>
+				{!!lastRun && (
+					<div style={{ margin: '10px', width: '100%', textAlign: 'center' }}>
+						<small style={{ color: '#0007', fontSize: '0.7rem' }}>
+							Data updater last ran: {new Date(lastRun.started_at).toLocaleString()} UTC
+							<br />
+							{!!lastRun.posts_retrieved ? (
+								<>
+									(Retrieved {lastRun.posts_retrieved} posts in {lastRun.duration_seconds} seconds)
+								</>
+							) : (
+								<>(Still loading latest comments...)</>
+							)}
+						</small>
+					</div>
+				)}
+			</>
+		);
+	},
+} satisfies ExportedHandler<Env>;

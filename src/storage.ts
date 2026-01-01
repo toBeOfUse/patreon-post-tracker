@@ -36,7 +36,7 @@ export type StoredPost = {
 	url: string;
 };
 
-enum SortableColumns {
+export enum SortableColumns {
 	CommentCount = 'comment_count',
 	LikeCount = 'like_count',
 	PublishedAt = 'published_at',
@@ -117,7 +117,7 @@ export class PostStorage extends DurableObject<Env> {
 
 		let retrievedPosts = 0;
 
-		while (retrievedPosts < 100) {
+		while (true) {
 			const response = await fetch(apiUrl);
 			const posts = (await response.json()) as PatreonApiResponse;
 			this.upsertJsonPosts(posts);
@@ -139,6 +139,20 @@ export class PostStorage extends DurableObject<Env> {
 			throw new Error('Count is somehow not a number :(');
 		}
 		return count;
+	}
+
+	getLastRun() {
+		const sqlQuery = `
+		select started_at, duration_seconds, posts_retrieved from doa_patreon_post_runs
+			order by started_at desc limit 1`;
+		const result = this.ctx.storage.sql.exec(sqlQuery);
+		return result.one() as
+			| {
+					started_at: string;
+					duration_seconds: number;
+					posts_retrieved: number;
+			  }
+			| undefined;
 	}
 
 	async getPosts(page = 1, sortBy: SortableColumns = SortableColumns.CommentCount, sortDirection = 'desc', query = '', perPage = 20) {

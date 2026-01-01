@@ -1,9 +1,13 @@
 {
 	"$schema": "./node_modules/wrangler/config-schema.json",
 	"name": "patreon-post-tracker",
-	"main": "src/worker.ts",
+	"main": "src/worker.tsx",
+	"jsx_factory": "React.createElement",
 	"workers_dev": true,
 	"preview_urls": false,
+	"triggers": {
+		"crons": ["0 * * * *"]
+	},
 	"durable_objects": {
 		"bindings": [
 			{
