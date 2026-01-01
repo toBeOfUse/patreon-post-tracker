@@ -1,7 +1,7 @@
 {
 	"$schema": "./node_modules/wrangler/config-schema.json",
 	"name": "patreon-post-tracker",
-	"main": "src/worker.js",
+	"main": "src/worker.ts",
 	"workers_dev": true,
 	"preview_urls": false,
 	"durable_objects": {
