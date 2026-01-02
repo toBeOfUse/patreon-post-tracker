@@ -5,7 +5,7 @@ import { PostStorage, SortableColumns, StoredPost } from './storage';
 
 export { PostStorage };
 
-const durableObjectName = 'posts_do';
+const durableObjectName = 'doa_posts';
 
 export default {
 	// cron job entrypoint; this just asks the durable object to update its
@@ -156,14 +156,6 @@ export default {
 					<div style={{ margin: '10px', width: '100%', textAlign: 'center' }}>
 						<small style={{ color: '#0007', fontSize: '0.7rem' }}>
 							Data updater last ran: {new Date(lastRun.started_at).toLocaleString()} UTC
-							<br />
-							{!!lastRun.posts_retrieved ? (
-								<>
-									(Retrieved {lastRun.posts_retrieved} posts in {lastRun.duration_seconds} seconds)
-								</>
-							) : (
-								<>(Still loading latest comments...)</>
-							)}
 						</small>
 					</div>
 				)}
