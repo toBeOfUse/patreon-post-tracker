@@ -200,15 +200,6 @@ export class PostStorage extends DurableObject<Env> {
 		this.storeRunEnd(startTime, (Date.now() - startTime.getTime()) / 1000, retrievedPosts, currentRunsLastNextLink ?? null);
 	}
 
-	getPostCount(): number {
-		const cursor = this.sql('SELECT COUNT(*) count FROM patreon_posts;');
-		const count = cursor.one().count;
-		if (typeof count !== 'number') {
-			throw new Error('Count is somehow not a number :(');
-		}
-		return count;
-	}
-
 	getLastRun() {
 		const lastRunQuery = `
 		select started_at, duration_seconds, posts_retrieved, last_next_link from patreon_post_runs
@@ -218,6 +209,21 @@ export class PostStorage extends DurableObject<Env> {
 			return undefined;
 		}
 		return lastRun.value as StoredPreviousRun;
+	}
+
+	// TODO: should this be folded into getPosts?
+	getPostCount(query = ''): number {
+		// copying the same filtering as getPosts
+		const cursor = this.sql(
+			`SELECT COUNT(*) count FROM patreon_posts
+				WHERE title LIKE ("%" || ? || "%")`,
+			query
+		);
+		const count = cursor.one().count;
+		if (typeof count !== 'number') {
+			throw new Error('Count is somehow not a number :(');
+		}
+		return count;
 	}
 
 	getPosts(page = 1, sortBy: SortableColumns = SortableColumns.CommentCount, sortDirection = 'desc', query = '', perPage = 20) {

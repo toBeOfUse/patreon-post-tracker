@@ -37,7 +37,8 @@ export default {
 		const query = currentSearchParams.get('search') ?? '';
 
 		const perPage = 20;
-		const postCount = await object.getPostCount();
+
+		const postCount = await object.getPostCount(query);
 		const maxPage = Math.ceil(postCount / perPage);
 		if (page > maxPage) {
 			return new Response(`Page not found; highest available page number is ${maxPage}`, { status: 404 });
