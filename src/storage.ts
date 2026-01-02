@@ -52,9 +52,12 @@ export enum SortableColumns {
 /**
  * Class that is responsible for persisting a copy of a bunch of Patreon posts
  * and letting you query them in ways that Patreon's API doesn't natively
- * support AFAIK. It is possible that this class has too much responsibility;
- * whoops? You could refactor it into a class that provides storage primitives
- * and some other thing that reads from the Patreon API, idk.
+ * support (as far as I know.)
+ *
+ * Since it's used to make durable object(s) with their own compute and storage,
+ * this class has a narrow and specialized interface to limit the number of RPC
+ * calls that need to be made to it. It does have quite a bit of responsibility
+ * as a result.
  */
 export class PostStorage extends DurableObject<Env> {
 	constructor(ctx: DurableObjectState, env: Env) {
@@ -121,6 +124,56 @@ export class PostStorage extends DurableObject<Env> {
 				post.attributes.url
 			);
 		}
+	}
+
+	/**
+	 * Returns the metadata that was stored the last time syncInPostsFromPatreon
+	 * was called. This metadata provides information about the synchronization
+	 * job itself.
+	 */
+	getLastRun() {
+		const lastRunQuery = `
+		select started_at, duration_seconds, posts_retrieved, last_next_link from patreon_post_runs
+			order by started_at desc limit 1`;
+		const lastRun = this.sql(lastRunQuery).next();
+		if (lastRun.done) {
+			return undefined;
+		}
+		return lastRun.value as StoredPreviousRun;
+	}
+
+	// TODO: should this be folded into getPosts?
+	private getPostCount(query = ''): number {
+		// copying the same filtering as getPosts
+		const cursor = this.sql(
+			`SELECT COUNT(*) count FROM patreon_posts
+				WHERE title LIKE ("%" || ? || "%")`,
+			query
+		);
+		const count = cursor.one().count;
+		if (typeof count !== 'number') {
+			throw new Error('Count is somehow not a number :(');
+		}
+		return count;
+	}
+
+	/**
+	 * Query the local copy of the stats stored for each of the Patreon posts.
+	 * Uses the data that is stored when syncInPostsFromPatreon runs.
+	 */
+	getPosts(page = 1, sortBy: SortableColumns = SortableColumns.CommentCount, sortDirection = 'desc', query = '', perPage = 20) {
+		if (!Object.values(SortableColumns).includes(sortBy) || !['asc', 'desc'].includes(sortDirection)) {
+			console.error('invalid sort parameters:', sortBy, sortDirection);
+			return { posts: [], totalPosts: 0 };
+		}
+		const offset = (page - 1) * perPage;
+		const limit = perPage;
+		const sqlQuery = `SELECT title, published_at, comment_count, like_count, url 
+            FROM patreon_posts
+            WHERE title LIKE ("%" || ? || "%")
+            order by ${sortBy} ${sortDirection} limit ? offset ?;`;
+		const result = this.sql(sqlQuery, query, limit, offset);
+		return { posts: result.toArray() as StoredPost[], totalPosts: this.getPostCount(query) };
 	}
 
 	// public interface ===================================
@@ -203,51 +256,11 @@ export class PostStorage extends DurableObject<Env> {
 		this.storeRunEnd(startTime, (Date.now() - startTime.getTime()) / 1000, retrievedPosts, currentRunsLastNextLink ?? null);
 	}
 
-	getLastRun() {
-		const lastRunQuery = `
-		select started_at, duration_seconds, posts_retrieved, last_next_link from patreon_post_runs
-			order by started_at desc limit 1`;
-		const lastRun = this.sql(lastRunQuery).next();
-		if (lastRun.done) {
-			return undefined;
-		}
-		return lastRun.value as StoredPreviousRun;
-	}
-
-	// TODO: should this be folded into getPosts?
-	getPostCount(query = ''): number {
-		// copying the same filtering as getPosts
-		const cursor = this.sql(
-			`SELECT COUNT(*) count FROM patreon_posts
-				WHERE title LIKE ("%" || ? || "%")`,
-			query
-		);
-		const count = cursor.one().count;
-		if (typeof count !== 'number') {
-			throw new Error('Count is somehow not a number :(');
-		}
-		return count;
-	}
-
-	getPosts(page = 1, sortBy: SortableColumns = SortableColumns.CommentCount, sortDirection = 'desc', query = '', perPage = 20) {
-		if (!Object.values(SortableColumns).includes(sortBy) || !['asc', 'desc'].includes(sortDirection)) {
-			console.error('invalid sort parameters:', sortBy, sortDirection);
-			return { posts: [], totalPosts: 0 };
-		}
-		const offset = (page - 1) * perPage;
-		const limit = perPage;
-		const sqlQuery = `SELECT title, published_at, comment_count, like_count, url 
-            FROM patreon_posts
-            WHERE title LIKE ("%" || ? || "%")
-            order by ${sortBy} ${sortDirection} limit ? offset ?;`;
-		const result = this.sql(sqlQuery, query, limit, offset);
-		return { posts: result.toArray() as StoredPost[], totalPosts: this.getPostCount(query) };
-	}
-
 	/**
 	 * This function returns all of the data that the primary worker needs to
-	 * build a results page. It exists as an optimization that means that the
-	 * main worker only needs to make one rpc call to its durable object.
+	 * build a results page. See getPosts and getLastRun for details. It exists
+	 * as an optimization that means that the main worker only needs to make one
+	 * rpc call to its durable object.
 	 */
 	getPageData(...args: Parameters<PostStorage['getPosts']>) {
 		return {
