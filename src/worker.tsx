@@ -12,7 +12,10 @@ export default {
 	// storage by retrieving the latest data for all of the posts from the
 	// patreon api
 	async scheduled(_controller, env, _ctx) {
-		await env.POSTS_DO.getByName(durableObjectName).syncInPostsFromPatreon();
+		// i don't think this needs to be awaited, since i think that the
+		// durable object will run completely separately from the main worker,
+		// and so just calling the stub and exiting will save the worker's clock time
+		env.POSTS_DO.getByName(durableObjectName).syncInPostsFromPatreon();
 	},
 	// web request entrypoint; this renders an interface for viewing the stored
 	// posts to html and returns it to the client
