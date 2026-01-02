@@ -125,14 +125,17 @@ export class PostStorage extends DurableObject<Env> {
 
 	// public interface ===================================
 
+	/**
+	 * this function retrieves and stores the stats for a subset of the posts
+	 * from the patreon.
+	 *
+	 * it can't get all of them since this is running on the cloudflare worker
+	 * free tier and that only lets you make up to 50 "subrequests" (which is a
+	 * category of operation that includes fetch() calls) per run. so, this
+	 * grabs the most recent 20 pages of posts, and then another 20 pages from
+	 * the archives.
+	 */
 	async syncInPostsFromPatreon() {
-		// this function syncs in a selection of posts from the patreon; it
-		// can't get all of them since this is running on the cloudflare worker
-		// free tier and that only lets you make up to 50 "subrequests" (which
-		// is a category of operation that includes fetch() calls) per run. so,
-		// this grabs the most recent 20 pages of posts, and then another 20
-		// pages from the archives.
-
 		// preemptively grab the data from the most recent sync job in the
 		// database before this sync job becomes the most recent sync job in the
 		// database
@@ -229,7 +232,7 @@ export class PostStorage extends DurableObject<Env> {
 	getPosts(page = 1, sortBy: SortableColumns = SortableColumns.CommentCount, sortDirection = 'desc', query = '', perPage = 20) {
 		if (!Object.values(SortableColumns).includes(sortBy) || !['asc', 'desc'].includes(sortDirection)) {
 			console.error('invalid sort parameters:', sortBy, sortDirection);
-			return [] as StoredPost[];
+			return { posts: [], totalPosts: 0 };
 		}
 		const offset = (page - 1) * perPage;
 		const limit = perPage;
@@ -238,6 +241,18 @@ export class PostStorage extends DurableObject<Env> {
             WHERE title LIKE ("%" || ? || "%")
             order by ${sortBy} ${sortDirection} limit ? offset ?;`;
 		const result = this.sql(sqlQuery, query, limit, offset);
-		return result.toArray() as StoredPost[];
+		return { posts: result.toArray() as StoredPost[], totalPosts: this.getPostCount(query) };
+	}
+
+	/**
+	 * This function returns all of the data that the primary worker needs to
+	 * build a results page. It exists as an optimization that means that the
+	 * main worker only needs to make one rpc call to its durable object.
+	 */
+	getPageData(...args: Parameters<PostStorage['getPosts']>) {
+		return {
+			...this.getPosts(...args),
+			lastRun: this.getLastRun(),
+		};
 	}
 }

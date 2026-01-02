@@ -12,10 +12,9 @@ export default {
 	// storage by retrieving the latest data for all of the posts from the
 	// patreon api
 	async scheduled(_controller, env, _ctx) {
-		// i don't think this needs to be awaited, since i think that the
-		// durable object will run completely separately from the main worker,
-		// and so just calling the stub and exiting will save the worker's clock time
-		env.POSTS_DO.getByName(durableObjectName).syncInPostsFromPatreon();
+		// even though it seems like the main worker shouldn't have to await the
+		// result of this rpc call, it kinda doesn't want to work unless i do
+		await env.POSTS_DO.getByName(durableObjectName).syncInPostsFromPatreon();
 	},
 	// web request entrypoint; this renders an interface for viewing the stored
 	// posts to html and returns it to the client
@@ -27,19 +26,20 @@ export default {
 			return new Response('path not found', { status: 404 });
 		}
 
-		const object = env.POSTS_DO.getByName(durableObjectName);
-
+		// marshall various parameters
 		const currentSearchParams = url.searchParams;
 		const pageParam = currentSearchParams.get('page');
 		const page = pageParam ? Number(pageParam) : 1;
 		const sortBy = currentSearchParams.get('sort') ?? 'comment_count';
 		const sortDirection = currentSearchParams.get('direction') ?? 'desc';
 		const query = currentSearchParams.get('search') ?? '';
-
 		const perPage = 20;
 
-		const postCount = await object.getPostCount(query);
-		const maxPage = Math.ceil(postCount / perPage);
+		// use the parameters to get data from the durable object
+		const object = env.POSTS_DO.getByName(durableObjectName);
+		const { posts, lastRun, totalPosts } = await object.getPageData(page, sortBy as SortableColumns, sortDirection, query, perPage);
+
+		const maxPage = Math.ceil(totalPosts / perPage);
 		if (page > maxPage) {
 			return new Response(`Page not found; highest available page number is ${maxPage}`, { status: 404 });
 		}
@@ -72,7 +72,6 @@ export default {
 			}
 		};
 
-		const posts = await object.getPosts(page, sortBy as SortableColumns, sortDirection, query, perPage);
 		const columnHeaders = posts.length
 			? (Object.keys(posts[0]).filter((col) => col !== 'id' && col !== 'url') as (keyof (typeof posts)[0])[])
 			: [];
@@ -83,8 +82,6 @@ export default {
 		const prevPageParams = extendQueryParams(currentSearchParams, {
 			page: String(page - 1),
 		});
-
-		const lastRun = await object.getLastRun();
 
 		return jsxBodyToWebResponse(
 			'DOA Patreon Posts Data Table',
